@@ -1,7 +1,12 @@
-# My Frist Game
+# My Frist Gam
 
-This is my first game porject.
+This is my first game project.
 
 ## Features
-- Player movement
-- Score system
+ - Player movement
+ - Score system
+
+ ## Another 
+
+ -ABCDEFG
+
