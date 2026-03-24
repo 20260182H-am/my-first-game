@@ -1,0 +1,160 @@
+import pygame
+import sys
+import math
+
+pygame.init()
+
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Collision Comparison")
+
+clock = pygame.time.Clock()
+
+WHITE = (255, 255, 255)
+GRAY = (150, 150, 150)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
+
+font = pygame.font.SysFont(None, 30)
+
+rect_player = pygame.Rect(100, 100, 80, 80)
+rect_static = pygame.Rect(WIDTH//2 - 75, HEIGHT//2 - 50, 150, 150)
+
+speed = 5
+
+angle = 0
+rotation_speed = 1
+
+static_surface = pygame.Surface((150, 150), pygame.SRCALPHA)
+static_surface.fill(GRAY)
+
+def circle_collision(c1, r1, c2, r2):
+    dx = c1[0] - c2[0]
+    dy = c1[1] - c2[1]
+    distance = math.sqrt(dx*dx + dy*dy)
+    return distance <= (r1 + r2)
+
+def aabb_collision(r1, r2):
+    return r1.colliderect(r2)
+
+def get_rotated_corners(rect, angle):
+    cx, cy = rect.center
+    w, h = rect.width // 2, rect.height // 2
+
+    corners = [(-w,-h),(w,-h),(w,h),(-w,h)]
+    rad = math.radians(angle)
+
+    result = []
+    for x,y in corners:
+        rx = x * math.cos(rad) - y * math.sin(rad)
+        ry = x * math.sin(rad) + y * math.cos(rad)
+        result.append((cx+rx, cy+ry))
+
+    return result
+
+def dot(a,b):
+    return a[0]*b[0] + a[1]*b[1]
+
+def normalize(v):
+    length = math.hypot(v[0], v[1])
+    return (v[0]/length, v[1]/length)
+
+def get_axes(corners):
+    axes = []
+    for i in range(4):
+        p1 = corners[i]
+        p2 = corners[(i+1)%4]
+
+        edge = (p2[0]-p1[0], p2[1]-p1[1])
+        axis = (-edge[1], edge[0])
+        axis = normalize(axis)
+        axes.append(axis)
+
+    return axes
+
+def project(corners, axis):
+    dots = [dot(p, axis) for p in corners]
+    return min(dots), max(dots)
+
+def obb_collision(c1, c2):
+    axes = get_axes(c1) + get_axes(c2)
+
+    for axis in axes:
+        min1, max1 = project(c1, axis)
+        min2, max2 = project(c2, axis)
+
+        if max1 < min2 or max2 < min1:
+            return False
+
+    return True
+
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+
+    keys = pygame.key.get_pressed()
+
+    if keys[pygame.K_LEFT]:
+        rect_player.x -= speed
+    if keys[pygame.K_RIGHT]:
+        rect_player.x += speed
+    if keys[pygame.K_UP]:
+        rect_player.y -= speed
+    if keys[pygame.K_DOWN]:
+        rect_player.y += speed
+
+    if keys[pygame.K_z]:
+        rotation_speed += 0.1
+
+    angle += rotation_speed
+
+    center_player = rect_player.center
+    center_static = rect_static.center
+
+    radius_player = rect_player.width // 2
+    radius_static = rect_static.width // 2
+
+    circle_hit = circle_collision(center_player, radius_player, center_static, radius_static)
+    aabb_hit = aabb_collision(rect_player, rect_static)
+
+    corners_player = get_rotated_corners(rect_player, 0)
+    corners_static = get_rotated_corners(rect_static, angle)
+    obb_hit = obb_collision(corners_player, corners_static)
+
+    screen.fill(WHITE)
+
+    # 플레이어
+    pygame.draw.rect(screen, GRAY, rect_player)
+
+    # 회전된 사각형 먼저 그림 (중요)
+    rotated_surface = pygame.transform.rotate(static_surface, -angle)
+    rotated_rect = rotated_surface.get_rect(center=rect_static.center)
+    screen.blit(rotated_surface, rotated_rect)
+
+    # AABB
+    pygame.draw.rect(screen, RED, rect_player, 2)
+    pygame.draw.rect(screen, RED, rect_static, 2)
+
+    # OBB
+    pygame.draw.polygon(screen, GREEN, corners_player, 2)
+    pygame.draw.polygon(screen, GREEN, corners_static, 2)
+
+    # 🔥 원을 맨 마지막에 그림 (핵심)
+    pygame.draw.circle(screen, BLUE, center_player, radius_player, 2)
+    pygame.draw.circle(screen, BLUE, center_static, radius_static, 2)
+
+    # 텍스트
+    def draw_text(text, y, hit):
+        color = (255, 0, 0) if hit else (0, 0, 0)
+        img = font.render(text, True, color)
+        screen.blit(img, (10, y))
+
+    draw_text(f"Circle: {'HIT' if circle_hit else 'NO'}", 10, circle_hit)
+    draw_text(f"AABB: {'HIT' if aabb_hit else 'NO'}", 40, aabb_hit)
+    draw_text(f"OBB: {'HIT' if obb_hit else 'NO'}", 70, obb_hit)
+
+    pygame.display.flip()
+    clock.tick(60)
