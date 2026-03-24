@@ -7,7 +7,7 @@
 
 ## AI 대화 기록
 
- ### 1.AABB에서는 sqrt를 쓰지 않고 circle에서는 sqrt를 쓰는 이유는 무었인가?
+ ### 1. AABB에서는 sqrt를 쓰지 않고 circle에서는 sqrt를 쓰는 이유는 무었인가?
 
 AI 답변: AABB(축 정렬 바운딩 박스)는 x축과 y축을 기준으로 겹치는지만 확인하면 되기 때문에 단순한 비교 연산만으로 충돌을 판별할 수 있다. 즉, 두 사각형의 좌우, 상하 범위를 비교하면 되므로 거리 계산이 필요 없다.
 반면 circle(원형 충돌)은 두 원의 중심 사이의 거리를 계산해야 한다. 이 거리가 두 원의 반지름의 합보다 작으면 충돌로 판단한다. 이때 중심 간의 실제 거리를 구하기 위해 피타고라스 공식을 사용하며, 이 과정에서 sqrt(루트)가 필요하다.
@@ -37,7 +37,7 @@ AI 답변: 단순히 박스를 회전시키는 것만으로는 정확한 충돌 
 SAT에서 사용하는 축 생성 (간단 개념)
 axes = [edge1_normal, edge2_normal]
 
-for axis in axes:
+    for axis in axes:
     proj1 = project(rect1, axis)
     proj2 = project(rect2, axis)
 
