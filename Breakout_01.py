@@ -1,3 +1,5 @@
+from turtle import color
+
 import pygame
 import sys
 
@@ -65,16 +67,17 @@ class Block:
         pass
 
     def draw(self, screen):
-        pygame.draw.rect(
-            screen,
-            (255, 0, 0),
-            (self.x, self.y, self.width - 5, self.height - 5)  # 🔥 살짝 줄임
-        )
+        color = (255, 0, 0)
 
+         # 🔥 피격 시 색 변경
         if self.hit_timer > 0:
             color = (255, 255, 255)
 
-        pygame.draw.rect(screen, color, (self.x, self.y, self.width, self.height))
+        pygame.draw.rect(
+            screen,
+            color,
+            (self.x, self.y, self.width - 5, self.height - 5)
+        )
 # =========================
 # Orb
 # =========================
@@ -138,7 +141,7 @@ class GameManager:
                 x = start_x + j * (block_width + gap)
                 y = start_y + i * (block_height + gap)
 
-                self.blocks.append(Block(x, y))
+                self.blocks.append(Block(x, y, block_width, block_height))
 
     def handle_input(self):
         keys = pygame.key.get_pressed()
@@ -260,6 +263,27 @@ class GameManager:
             self.ball.vy *= -1
             collided = True
 
+            # 🔥 BOSS 충돌
+        if self.state == "BOSS" and self.boss:
+            boss_rect = pygame.Rect(
+                self.boss.x,
+                self.boss.y,
+                self.boss.width,
+                self.boss.height
+            )
+
+            if ball_rect.colliderect(boss_rect):
+                self.ball.vy *= -1
+                self.boss.hp -= 1
+                self.boss.hit_timer = 10
+
+                if self.boss.hp <= 0:
+                    self.boss = None
+                    self.remember_gauge = 0
+                    self.state = "PLAY"
+                    self.create_blocks()
+
+
         # 2️⃣ 블록
         if not collided:
             for block in self.blocks:
@@ -285,26 +309,7 @@ class GameManager:
                     collided = True
                     break
 
-        # 🔥 BOSS 충돌
-        if self.state == "BOSS" and self.boss:
-            boss_rect = pygame.Rect(
-                self.boss.x,
-                self.boss.y,
-                self.boss.width,
-                self.boss.height
-            )
-
-            if ball_rect.colliderect(boss_rect):
-                self.ball.vy *= -1
-                self.boss.hp -= 1
-                self.boss.hit_timer = 10
-
-                if self.boss.hp <= 0:
-                    self.boss = None
-                    self.remember_gauge = 0
-                    self.state = "PLAY"
-                    self.create_blocks()
-
+        
 
         # 3️⃣ 벽 (마지막)
         if not collided:    
