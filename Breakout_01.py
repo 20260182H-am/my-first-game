@@ -1,5 +1,3 @@
-from turtle import color
-
 import pygame
 import sys
 
