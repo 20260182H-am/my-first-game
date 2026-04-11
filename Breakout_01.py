@@ -1,3 +1,6 @@
+from ast import pattern
+import random  # 파일 맨 위에 추가 필요
+
 import pygame
 import sys
 
@@ -5,6 +8,13 @@ pygame.init()
 
 WIDTH, HEIGHT = 600, 1000
 FPS = 60
+
+GRID_SIZE = 50
+
+COLS = WIDTH // GRID_SIZE   # 12
+ROWS = HEIGHT // GRID_SIZE  # 20
+
+PLAY_ROWS = 17  # 실제 플레이 영역
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
@@ -53,11 +63,11 @@ class Paddle:
 # Block
 # =========================
 class Block:
-    def __init__(self, x, y, width=60, height=20):
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
+    def __init__(self, col, row, size):
+        self.col = col
+        self.row = row
+        self.size = size
+        
         self.hp = 1
         self.hit_timer = 0
 
@@ -65,17 +75,15 @@ class Block:
         pass
 
     def draw(self, screen):
+        x = self.col * self.size
+        y = self.row * self.size
+
         color = (255, 0, 0)
 
-         # 🔥 피격 시 색 변경
         if self.hit_timer > 0:
             color = (255, 255, 255)
 
-        pygame.draw.rect(
-            screen,
-            color,
-            (self.x, self.y, self.width - 5, self.height - 5)
-        )
+        pygame.draw.rect(screen, color, (x, y, self.size, self.size))
 # =========================
 # Orb
 # =========================
@@ -124,57 +132,107 @@ class GameManager:
         self.ball = Ball()
         self.paddle = Paddle()
         self.blocks = []
+
+
+        self.patterns = [
+            [[0,1,0],
+            [1,1,1],
+            [0,1,0]],
+
+            [[1,0,1],
+            [0,1,0],
+            [1,0,1]],
+
+            [[1,1,1],
+            [1,0,1],
+            [1,1,1]],
+
+            [[0,1,1],
+            [1,1,0],
+            [0,1,0]],
+        ]
+
+    def spawn_filled_row(self):
+        patterns = [
+            [[1,1,1],
+            [1,1,1],
+            [1,1,1]],
+
+            [[1,1],
+            [1,1],
+            [1,1]],
+
+            [[1],
+            [1],
+            [1]],
+        ]
+
+        col = 0
+
+        while col < COLS:
+            pattern = random.choice(patterns)
+            width = len(pattern[0])
+
+            if col + width > COLS:
+                pattern = [[1],[1],[1]]
+                width = 1
+
+            for i in range(len(pattern)):
+                for j in range(len(pattern[0])):
+                    if pattern[i][j] == 1:
+                        self.blocks.append(
+                            Block(col + j, i, GRID_SIZE)
+                        )
+
+            col += width
+            
         
-        self.create_blocks()
-
-    def create_blocks(self):
-        self.blocks.clear()
-        cols = 10
-        rows = 5
-
-        gap = 5
-
-        # 🔥 화면 기준으로 자동 계산
-        block_width = (WIDTH - gap * (cols - 1)) // cols
-        block_height = 20
-
-        start_x = 0
-        start_y = 50
-
-        for i in range(rows):
-            for j in range(cols):
-                x = start_x + j * (block_width + gap)
-                y = start_y + i * (block_height + gap)
-
-                self.blocks.append(Block(x, y, block_width, block_height))
-
     def drop_blocks(self):
-        block_height = 20 + 5  # height + gap
-
-        # 🔥 기존 블록 전부 아래로 이동
+        # 🔥 기존 블록 아래로 이동
         for block in self.blocks:
-            block.y += block_height
+            block.row += 3   # 🔥 한 번에 3칸 (패턴 높이)
 
-    def spawn_block_row(self):
-        cols = 10
-        gap = 5
+        # 🔥 새 줄 생성 (꽉 채움)
+        self.spawn_filled_row()
 
-        block_width = (WIDTH - gap * (cols - 1)) // cols
-        block_height = 20
+        # 🔥 게임오버 체크
+        self.check_block_gameover()
 
-        start_y = 50
 
-        for j in range(cols):
-            x = j * (block_width + gap)
-            y = start_y
+    def can_spawn_pattern(self, start_x, start_y, block_size):
+        for block in self.blocks:
+            for i in range(3):
+                for j in range(3):
+                    x = start_x + j * block_size
+                    y = start_y + i * block_size
 
-            self.blocks.append(Block(x, y, block_width, block_height))
+                    new_rect = pygame.Rect(x, y, block_size, block_size)
+                    block_rect = pygame.Rect(block.x, block.y, block.width, block.height)
+
+                    if new_rect.colliderect(block_rect):
+                        return False
+        return True
+ 
+
+    def spawn_pattern(self):
+        pattern = random.choice(self.patterns)
+
+        start_col = random.randint(0, COLS - 3)
+        start_row = 0
+
+        for i in range(3):
+            for j in range(3):
+                if pattern[i][j] == 1:
+                    col = start_col + j
+                    row = start_row + i
+
+                    self.blocks.append(Block(col, row, GRID_SIZE))
 
     def check_block_gameover(self):
         fail_line = self.paddle.y - 20  # 패들 바로 위
 
         for block in self.blocks:
-            if block.y + block.height >= fail_line:
+            if block.row >= PLAY_ROWS:
                 self.state = "GAMEOVER"
                 return
 
@@ -212,39 +270,39 @@ class GameManager:
             if self.state == "BOSS" and self.boss:
                 self.boss.hp = 0
 
+        # 🔥 블록 강제 하강 (디버그)
+        if event.key == pygame.K_3:
+            self.drop_blocks()
         
         
 
 
     def update(self):
-
+  
         if self.state == "GAMEOVER":
-            return5
-    
+            return
+
         self.orbs.clear()
 
-       # 🔥 입력은 항상 받는다
         self.handle_input()
 
-    # 🔥 게임 진행 상태
-        if self.state == "PLAY":
+        if self.state == "PLAY" or self.state == "BOSS":
             self.ball.update()
             self.paddle.update()
 
             self.check_collision()
-            self.check_gameover()
 
-            # 🔥 게이지 체크는 PLAY에서만
+            # 🔥 게이지 → 보스
             if self.state == "PLAY":
                 if self.remember_gauge >= self.remember_max:
                     self.spawn_boss()
 
+            # 🔥 블록 하강 타이머
             self.drop_timer += 1
-
             if self.drop_timer >= self.drop_interval:
                 self.drop_blocks()
                 self.drop_timer = 0
-                    
+
         for orb in self.orbs:
             orb.update()
 
@@ -255,6 +313,23 @@ class GameManager:
 
     def draw(self, screen):
         screen.fill((40, 40, 40))
+
+        # 🔥 GRID (격자)
+        grid_size = 50
+        grid_color = (80, 80, 80)  # 연한 회색
+
+        # 세로 17칸까지만 그림
+        for row in range(15):
+            for col in range(12):
+                x = col * grid_size
+                y = row * grid_size
+
+                pygame.draw.rect(
+                    screen,
+                    grid_color,
+                    (x, y, grid_size, grid_size),
+                    1  # 🔥 테두리만
+                )
 
         # 1️⃣ 일반 게임 요소
         self.ball.draw(screen)
@@ -353,10 +428,10 @@ class GameManager:
           # 🔥 BOSS 충돌
         if self.state == "BOSS" and self.boss:
             boss_rect = pygame.Rect(
-                self.boss.x,
-                self.boss.y,
-                self.boss.width,
-                self.boss.height
+                self.boss.col * GRID_SIZE,
+                self.boss.row * GRID_SIZE,
+                self.boss.size,
+                self.boss.size
             )
 
             if ball_rect.colliderect(boss_rect):
@@ -379,35 +454,24 @@ class GameManager:
 
                     # 🔥 다음 챕터
                     self.state = "PLAY"
-                    self.create_blocks()  
-                    
-                return
+                     
 
         # 2️⃣ 블록
+       
         if not collided:
-            for block in self.blocks:
-                block_rect = pygame.Rect(
-                    block.x,
-                    block.y,
-                    block.width,
-                    block.height
-                )
+            ball_col = self.ball.x // GRID_SIZE
+            ball_row = self.ball.y // GRID_SIZE
 
-                if ball_rect.colliderect(block_rect):
+            for block in self.blocks:
+                if block.col == ball_col and block.row == ball_row:
                     block.hp -= 1
                     self.ball.vy *= -1
 
                     if block.hp <= 0:
                         self.blocks.remove(block)
-                        self.score += 10 # 내부 유지
-
                         self.remember_gauge += 1
 
-                         # 🔥 오브 생성 (지금은 그냥 생성만)
-                    
-                    collided = True
                     break
-
         
 
         # 3️⃣ 벽 (마지막)
@@ -432,22 +496,33 @@ class GameManager:
         x = WIDTH // 2 - 50
         y = 100
 
-        self.boss = Block(x, y, 200, 80)
+        boss_size = GRID_SIZE * 4
+        boss_col = (COLS // 2) - 2   # 중앙 정렬
+        boss_row = 2
+
+        self.boss = Block(boss_col, boss_row, boss_size)
         base_hp = 15    
         self.boss.max_hp = base_hp + (self.chapter * 5)
         self.boss.hp = self.boss.max_hp
 
-        self.boss.x = WIDTH // 2 - self.boss.width // 2
+        
 
         speed = 5 + self.chapter
 
-        self.ball.vx = speed if self.ball.vx > 0 else -speed
+        if self.ball.vx == 0:
+            self.ball.vx = speed
+        else:
+            self.ball.vx = speed if self.ball.vx > 0 else -speed
+
         self.ball.vy = -speed
 
-    def check_gameover(self):
-        if self.ball.y >= HEIGHT:
-            self.state = "GAMEOVER"
 
+
+    def check_gameover(self):
+        for block in self.blocks:
+            if block.row >= PLAY_ROWS:
+                self.state = "GAMEOVER"
+                return
 # =========================
 # Main Loop
 # =========================
