@@ -113,15 +113,22 @@ class GameManager:
         self.remember_gauge = 0
         self.remember_max = 30
 
+        self.drop_timer = 0
+        self.drop_interval = 300  # 5초 (FPS 60 기준)
+
+        self.chapter = 1
+        self.max_chapter = 3
+
         self.orbs = []   # 🔥 오브 리스트 (나중에 사용)
 
         self.ball = Ball()
         self.paddle = Paddle()
         self.blocks = []
-
+        
         self.create_blocks()
 
     def create_blocks(self):
+        self.blocks.clear()
         cols = 10
         rows = 5
 
@@ -141,6 +148,36 @@ class GameManager:
 
                 self.blocks.append(Block(x, y, block_width, block_height))
 
+    def drop_blocks(self):
+        block_height = 20 + 5  # height + gap
+
+        # 🔥 기존 블록 전부 아래로 이동
+        for block in self.blocks:
+            block.y += block_height
+
+    def spawn_block_row(self):
+        cols = 10
+        gap = 5
+
+        block_width = (WIDTH - gap * (cols - 1)) // cols
+        block_height = 20
+
+        start_y = 50
+
+        for j in range(cols):
+            x = j * (block_width + gap)
+            y = start_y
+
+            self.blocks.append(Block(x, y, block_width, block_height))
+
+    def check_block_gameover(self):
+        fail_line = self.paddle.y - 20  # 패들 바로 위
+
+        for block in self.blocks:
+            if block.y + block.height >= fail_line:
+                self.state = "GAMEOVER"
+                return
+
     def handle_input(self):
         keys = pygame.key.get_pressed()
 
@@ -149,24 +186,48 @@ class GameManager:
         if keys[pygame.K_RIGHT]:
             self.paddle.x += self.paddle.speed
 
+        # 🔥 화면 밖 제한
+        if self.paddle.x < 0:
+            self.paddle.x = 0
+
+        if self.paddle.x + self.paddle.width > WIDTH:
+            self.paddle.x = WIDTH - self.paddle.width
+
+       
+
 
     def handle_keydown(self, event):
         if event.key == pygame.K_r and self.state == "GAMEOVER":
             self.__init__()
 
+        if self.state == "GAMECLEAR":
+            if event.key == pygame.K_r:
+                self.__init__()
+
         # 디버그 커맨드
         if event.key == pygame.K_1:
             self.remember_gauge = self.remember_max
 
+        if event.key == pygame.K_2:
+            if self.state == "BOSS" and self.boss:
+                self.boss.hp = 0
 
-    def update(self): 
+        
+        
+
+
+    def update(self):
+
+        if self.state == "GAMEOVER":
+            return5
+    
         self.orbs.clear()
 
        # 🔥 입력은 항상 받는다
         self.handle_input()
 
     # 🔥 게임 진행 상태
-        if self.state == "PLAY" or self.state == "BOSS":
+        if self.state == "PLAY":
             self.ball.update()
             self.paddle.update()
 
@@ -177,6 +238,12 @@ class GameManager:
             if self.state == "PLAY":
                 if self.remember_gauge >= self.remember_max:
                     self.spawn_boss()
+
+            self.drop_timer += 1
+
+            if self.drop_timer >= self.drop_interval:
+                self.drop_blocks()
+                self.drop_timer = 0
                     
         for orb in self.orbs:
             orb.update()
@@ -210,11 +277,24 @@ class GameManager:
             text = font.render("GAME OVER", True, (255, 0, 0))
             screen.blit(text, (WIDTH//2 - 150, HEIGHT//2))
 
+        if self.state == "GAMECLEAR":
+            font = pygame.font.SysFont(None, 60)
+            text = font.render("CLEAR", True, (0, 255, 0))
+
+            x = WIDTH // 2 - text.get_width() // 2
+            y = HEIGHT // 2 - text.get_height() // 2
+
+            screen.blit(text, (x, y))
+    
         # 🔥 REMEMBER UI
         font = pygame.font.SysFont(None, 60)
 
         text_bg = font.render("REMEMBER", True, (100, 100, 100))   # 회색
         text_fill = font.render("REMEMBER", True, (255, 255, 0))   # 노란색
+
+        font = pygame.font.SysFont(None, 30)
+        text = font.render(f"CHAPTER {self.chapter}", True, (255,255,255))
+        screen.blit(text, (20, 80))
 
         # 위치 (우상단)
         x = 20
@@ -233,6 +313,15 @@ class GameManager:
         if fill_width > 0:
             fill_rect = pygame.Rect(0, 0, fill_width, text_bg.get_height())
             screen.blit(text_fill, (x, y), fill_rect)
+
+        # 🔥 실패 라인 깜빡임
+        fail_line = self.paddle.y - 20
+
+        # 깜빡임 (시간 기반)
+        if (pygame.time.get_ticks() // 300) % 2 == 0:
+            pygame.draw.line(screen, (255, 0, 0), (0, fail_line), (WIDTH, fail_line), 2)
+
+            
                     
     
     def check_collision(self):
@@ -261,7 +350,7 @@ class GameManager:
             self.ball.vy *= -1
             collided = True
 
-            # 🔥 BOSS 충돌
+          # 🔥 BOSS 충돌
         if self.state == "BOSS" and self.boss:
             boss_rect = pygame.Rect(
                 self.boss.x,
@@ -274,13 +363,25 @@ class GameManager:
                 self.ball.vy *= -1
                 self.boss.hp -= 1
                 self.boss.hit_timer = 10
+                collided = True
 
                 if self.boss.hp <= 0:
                     self.boss = None
                     self.remember_gauge = 0
-                    self.state = "PLAY"
-                    self.create_blocks()
 
+                    # 🔥 챕터 증가
+                    self.chapter += 1
+
+                    # 🔥 엔딩 체크
+                    if self.chapter > self.max_chapter:
+                        self.state = "GAMECLEAR"
+                        return
+
+                    # 🔥 다음 챕터
+                    self.state = "PLAY"
+                    self.create_blocks()  
+                    
+                return
 
         # 2️⃣ 블록
         if not collided:
@@ -310,11 +411,12 @@ class GameManager:
         
 
         # 3️⃣ 벽 (마지막)
-        if not collided:    
-            if self.ball.x <= 0 or self.ball.x >= WIDTH:
-                self.ball.vx *= -1
+        # 🔥 3️⃣ 벽 충돌 (반지름 고려)
+        if not collided:
+            if self.ball.x - self.ball.radius <= 0 or self.ball.x + self.ball.radius >= WIDTH:
+                    self.ball.vx *= -1
 
-            if self.ball.y <= 0:
+            if self.ball.y - self.ball.radius <= 0:
                 self.ball.vy *= -1
 
     def spawn_boss(self):
@@ -331,9 +433,16 @@ class GameManager:
         y = 100
 
         self.boss = Block(x, y, 200, 80)
-        self.boss.hp = 20   # 🔥 체력 크게
+        base_hp = 15    
+        self.boss.max_hp = base_hp + (self.chapter * 5)
+        self.boss.hp = self.boss.max_hp
 
         self.boss.x = WIDTH // 2 - self.boss.width // 2
+
+        speed = 5 + self.chapter
+
+        self.ball.vx = speed if self.ball.vx > 0 else -speed
+        self.ball.vy = -speed
 
     def check_gameover(self):
         if self.ball.y >= HEIGHT:
