@@ -306,7 +306,7 @@ class Paddle:
         self.width  = 140
         self.height = 20
         self.x      = WIDTH // 2 - self.width // 2
-        self.y      = HEIGHT - 170
+        self.y      = HEIGHT - 100
 
     def draw(self, screen):
         pygame.draw.rect(screen, (255, 255, 255),
@@ -978,10 +978,10 @@ def draw_boss_hp_bar(screen, boss):
 
 def draw_remember_gauge(screen, gauge, gauge_max, scale=1.0):
     ratio    = max(0.0, min(1.0, gauge/gauge_max))
-    font_big = kr_font(int(60*scale))
+    font_big = kr_font(int(40*scale))
     base_txt = font_big.render("REMEMBER", True, (100,100,100))
     ux = WIDTH//2 - base_txt.get_width()//2
-    uy = HEIGHT -100
+    uy = HEIGHT - 50 + 28
     screen.blit(base_txt, (ux, uy))
     if ratio < 0.5:
         fill_color = (255, 220, 0)

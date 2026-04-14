@@ -996,7 +996,7 @@ def draw_remember_gauge(screen, gauge, gauge_max, scale=1.0):
         screen.blit(fill_txt, (ux, uy),
                     pygame.Rect(0,0,fill_w,base_txt.get_height()))
 
-
+ 
 def draw_lives(screen, lives, max_lives=3):
     fail_y  = PLAY_ROWS * GRID_SIZE
     x_start = WIDTH - 16; size = 18; gap = 6
