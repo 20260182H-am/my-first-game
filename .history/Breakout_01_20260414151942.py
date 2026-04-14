@@ -604,35 +604,6 @@ class WaveManager:
             self._spawn_one_group(col, start_row)
             col += 3
 
-    def split_holes(self, holes):
-        visited = set()
-        groups = []
-
-        for h in holes:
-            if h in visited:
-                continue
-
-            stack = [h]
-            group = []
-
-            while stack:
-                x, y = stack.pop()
-                if (x, y) in visited:
-                    continue
-
-                visited.add((x, y))
-                group.append((x, y))
-
-                # 상하좌우 연결 탐색
-                for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                    nx, ny = x+dx, y+dy
-                    if (nx, ny) in holes and (nx, ny) not in visited:
-                        stack.append((nx, ny))
-
-            groups.append(group)
-
-        return groups
-
     def _spawn_one_group(self, col, row):
         base    = random.choice(self.base_patterns)
         pattern = base
@@ -655,8 +626,6 @@ class WaveManager:
             for (x,y) in group:
                 hp_pat[y][x] = 1
 
-            self.all_blocks.append(
-                PatternBlock(col, row, hp_pat, hole_color))   # 🔥 여기 수정
 
     @staticmethod
     def _rotate(pattern):

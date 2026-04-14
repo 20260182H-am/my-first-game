@@ -26,11 +26,11 @@ def kr_font(size):
 # =============================================================
 # 하강 상수
 # =============================================================
-WAIT_FRAMES   = 330
+WAIT_FRAMES   = 270
 SLIDE_FRAMES  = 30
 DROP_CYCLE    = WAIT_FRAMES + SLIDE_FRAMES
 
-BOSS_WAIT_FRAMES  = 390
+BOSS_WAIT_FRAMES  = 330
 BOSS_SLIDE_FRAMES = 30
 BOSS_DROP_CYCLE   = BOSS_WAIT_FRAMES + BOSS_SLIDE_FRAMES
 
@@ -483,7 +483,7 @@ class Paddle:
     BASE_SPEED = 10
 
     def __init__(self):
-        self.width  = 160
+        self.width  = 140
         self.height = 20
         self.x      = WIDTH // 2 - self.width // 2
         self.y      = HEIGHT - 170
@@ -518,7 +518,7 @@ class PatternBlock:
             for j in range(len(self.pattern[0])):
                 if self.pattern[i][j] == 1:
                     self.blocks.append((self.col + j, self.row + i))
-        self.hp = max(1, round(len(self.blocks) / 2))
+        self.hp = max(1, round(len(self.blocks) / 2) - 1)
 
     def move_down_logic(self):
         self.row += 1
@@ -554,14 +554,6 @@ class PatternBlock:
 
 class WaveManager:
     def __init__(self, base_patterns, pattern_colors):
-        self.hole_colors = [
-            (180, 180, 180),   # 밝은 회색
-            (120, 120, 120),   # 중간 회색
-            (200, 200, 255),   # 연한 파랑
-            (255, 200, 200),   # 연한 빨강
-            (200, 255, 200),   # 연한 초록
-            (255, 255, 180),   # 연한 노랑
-        ]
         self.base_patterns  = base_patterns
         self.pattern_colors = pattern_colors
         self.all_blocks     = []
@@ -604,35 +596,6 @@ class WaveManager:
             self._spawn_one_group(col, start_row)
             col += 3
 
-    def split_holes(self, holes):
-        visited = set()
-        groups = []
-
-        for h in holes:
-            if h in visited:
-                continue
-
-            stack = [h]
-            group = []
-
-            while stack:
-                x, y = stack.pop()
-                if (x, y) in visited:
-                    continue
-
-                visited.add((x, y))
-                group.append((x, y))
-
-                # 상하좌우 연결 탐색
-                for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                    nx, ny = x+dx, y+dy
-                    if (nx, ny) in holes and (nx, ny) not in visited:
-                        stack.append((nx, ny))
-
-            groups.append(group)
-
-        return groups
-
     def _spawn_one_group(self, col, row):
         base    = random.choice(self.base_patterns)
         pattern = base
@@ -644,19 +607,14 @@ class WaveManager:
 
         filled = {(j,i) for i in range(len(pattern))
                   for j in range(len(pattern[0])) if pattern[i][j]==1}
-        holes = [(i,j) for i in range(3)
-         for j in range(3) if (i,j) not in filled]
-
-        # 🔥 추가 위치 (여기)
-        hole_color = random.choice(self.hole_colors)
-
-        for group in self.split_holes(holes):
+        holes  = [(j,i) for i in range(3) for j in range(3)
+                  if (j,i) not in filled]
+        for group in self._split_holes(holes):
             hp_pat = [[0]*3 for _ in range(3)]
             for (x,y) in group:
                 hp_pat[y][x] = 1
-
             self.all_blocks.append(
-                PatternBlock(col, row, hp_pat, hole_color))   # 🔥 여기 수정
+                PatternBlock(col, row, hp_pat, (80,80,80)))
 
     @staticmethod
     def _rotate(pattern):

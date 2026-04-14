@@ -26,15 +26,15 @@ def kr_font(size):
 # =============================================================
 # 하강 상수
 # =============================================================
-WAIT_FRAMES   = 330
+WAIT_FRAMES   = 270
 SLIDE_FRAMES  = 30
 DROP_CYCLE    = WAIT_FRAMES + SLIDE_FRAMES
 
-BOSS_WAIT_FRAMES  = 390
+BOSS_WAIT_FRAMES  = 330
 BOSS_SLIDE_FRAMES = 30
 BOSS_DROP_CYCLE   = BOSS_WAIT_FRAMES + BOSS_SLIDE_FRAMES
 
-BALL_BASE_SPEED = 8.5
+BALL_BASE_SPEED = 10.0
 
 def slide_offset(timer, wait, slide):
     if timer < wait:
@@ -483,7 +483,7 @@ class Paddle:
     BASE_SPEED = 10
 
     def __init__(self):
-        self.width  = 160
+        self.width  = 140
         self.height = 20
         self.x      = WIDTH // 2 - self.width // 2
         self.y      = HEIGHT - 170
@@ -554,14 +554,6 @@ class PatternBlock:
 
 class WaveManager:
     def __init__(self, base_patterns, pattern_colors):
-        self.hole_colors = [
-            (180, 180, 180),   # 밝은 회색
-            (120, 120, 120),   # 중간 회색
-            (200, 200, 255),   # 연한 파랑
-            (255, 200, 200),   # 연한 빨강
-            (200, 255, 200),   # 연한 초록
-            (255, 255, 180),   # 연한 노랑
-        ]
         self.base_patterns  = base_patterns
         self.pattern_colors = pattern_colors
         self.all_blocks     = []
@@ -604,35 +596,6 @@ class WaveManager:
             self._spawn_one_group(col, start_row)
             col += 3
 
-    def split_holes(self, holes):
-        visited = set()
-        groups = []
-
-        for h in holes:
-            if h in visited:
-                continue
-
-            stack = [h]
-            group = []
-
-            while stack:
-                x, y = stack.pop()
-                if (x, y) in visited:
-                    continue
-
-                visited.add((x, y))
-                group.append((x, y))
-
-                # 상하좌우 연결 탐색
-                for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                    nx, ny = x+dx, y+dy
-                    if (nx, ny) in holes and (nx, ny) not in visited:
-                        stack.append((nx, ny))
-
-            groups.append(group)
-
-        return groups
-
     def _spawn_one_group(self, col, row):
         base    = random.choice(self.base_patterns)
         pattern = base
@@ -644,19 +607,14 @@ class WaveManager:
 
         filled = {(j,i) for i in range(len(pattern))
                   for j in range(len(pattern[0])) if pattern[i][j]==1}
-        holes = [(i,j) for i in range(3)
-         for j in range(3) if (i,j) not in filled]
-
-        # 🔥 추가 위치 (여기)
-        hole_color = random.choice(self.hole_colors)
-
-        for group in self.split_holes(holes):
+        holes  = [(j,i) for i in range(3) for j in range(3)
+                  if (j,i) not in filled]
+        for group in self._split_holes(holes):
             hp_pat = [[0]*3 for _ in range(3)]
             for (x,y) in group:
                 hp_pat[y][x] = 1
-
             self.all_blocks.append(
-                PatternBlock(col, row, hp_pat, hole_color))   # 🔥 여기 수정
+                PatternBlock(col, row, hp_pat, (80,80,80)))
 
     @staticmethod
     def _rotate(pattern):
@@ -1078,11 +1036,8 @@ class SplitBlock:
     INVINCIBLE_FRAMES = 60
 
     def __init__(self, px, py, size, drop_timer_ref=None):
-        # 격자(GRID_SIZE) 단위로 스냅 — 배경 격자와 항상 일치
-        self.px       = float(round(px / GRID_SIZE) * GRID_SIZE)
-        _py           = float(round(py / GRID_SIZE) * GRID_SIZE)
-        self.py       = _py
-        self._base_py = _py
+        self.px = float(px); self.py = float(py)
+        self._base_py = float(py)
         self.size     = size
         self.px_size  = size * GRID_SIZE
         self.max_hp   = self.SIZE_HP[size]; self.hp = self.max_hp
@@ -1119,9 +1074,7 @@ class SplitBlock:
 class Boss3(BossDropMixin):
     NAME         = "BOSS 3"
     DISPLAY_NAME = "보스 3"
-    # 전체 체력 = size4(4) + size2×4개(2×4=8) + size1×16개(1×16=16) = 28
-    # 체력바는 28로 시작, 분열로 생겨난 블럭들의 HP가 모두 반영됨
-    MAX_TOTAL_HP = 28   # 실제 존재 가능한 최대 HP 합산
+    MAX_TOTAL_HP = 32   # 4(원본) + 8(1차분열 4×2) + 16(2차분열 8×2) + 여유 4
 
     def __init__(self):
         start_px = (COLS//2-2)*GRID_SIZE
@@ -1136,10 +1089,6 @@ class Boss3(BossDropMixin):
         # 분열 횟수 추적
         self._split_count   = 0   # 0:미분열, 1:1회, 2:2회
         self._perm_debuff_added = False  # 상시 디버프 추가 여부 알림 플래그
-        # 시작부터 최대 HP를 32로 표시하기 위해 "잠재 HP"를 미리 포함
-        # size4(4) → 분열 시 size2×4(8) → 각각 분열 시 size1×4(4개씩, 최대 16)
-        # 처음에는 4+8+16=28을 표시 체력으로 잡음
-        self._display_max_hp = self.MAX_TOTAL_HP
 
     @property
     def is_dead(self):
@@ -1147,21 +1096,7 @@ class Boss3(BossDropMixin):
 
     @property
     def total_hp(self):
-        # 실제 살아있는 블럭 HP + 아직 생성되지 않은 분열 후 블럭들의 잠재 HP
-        alive_hp = sum(b.hp for b in self.blocks if b.alive)
-        # 분열 전 단계에 따른 잠재 HP 추가
-        # split_count=0: size4 존재 → 분열 후 size2×4(HP=8), size2 분열 후 size1×16(HP=16)
-        # split_count=1: size2들 존재 → 각 분열 후 size1×4(HP=4), 최대 4개 → 16
-        # split_count=2: size1들만 존재 → 잠재 없음
-        potential = 0
-        if self._split_count == 0:
-            # 아직 size4 단계: 분열하면 생길 size2(HP=2×4=8) + 그 이후 size1(HP=1×16=16)
-            potential = 8 + 16
-        elif self._split_count == 1:
-            # size2 단계: 각 size2 블럭이 분열하면 size1×4개(HP=4) 생김
-            size2_alive = sum(1 for b in self.blocks if b.alive and b.size == 2)
-            potential = size2_alive * 4
-        return alive_hp + potential
+        return sum(b.hp for b in self.blocks if b.alive)
 
     @property
     def max_total_hp(self):
@@ -1211,89 +1146,74 @@ class Boss3(BossDropMixin):
         for b in self.blocks: b._base_py += GRID_SIZE
 
     def _split(self, parent):
-        """분열 — 격자(GRID_SIZE) 단위로 정렬된 랜덤 위치에 배치"""
+        """분열 — 주변 랜덤 빈 칸에 배치"""
+        occupied = {(int(b.px), int(b._base_py))
+                    for b in self.blocks if b.alive or b.invincible_timer > 0}
 
         if parent.size == 4:
-            # size4 → size2 × 4개  (블럭 크기 = 2×GRID_SIZE)
-            unit = 2 * GRID_SIZE   # size2 블럭 한 칸 단위
+            # size4 → size2 × 4개, 각각 2×GRID_SIZE 크기
+            half = parent.px_size // 2  # = 2 * GRID_SIZE
 
-            # 이미 점유된 격자 좌표 집합 (unit 단위)
-            occupied = set()
-            for b in self.blocks:
-                if b.alive or b.invincible_timer > 0:
-                    # 각 블럭을 unit 격자로 환산
-                    gx = round(b.px / unit)
-                    gy = round(b._base_py / unit)
-                    for di in range(b.size // 2):        # size4→2칸, size2→1칸
-                        for dj in range(b.size // 2):
-                            occupied.add((gx + dj, gy + di))
-
-            # 부모 중심을 unit 격자 좌표로
-            pcx = round(parent.px / unit)
-            pcy = round(parent._base_py / unit)
-
-            # 후보: 부모 주변 ±3 unit 범위 (unit 격자 단위)
+            # 후보 위치: 부모 중심 주변 넓은 범위
+            cx = int(parent.px) + half
+            cy = int(parent._base_py) + half
             candidates = []
             for dr in range(-3, 4):
                 for dc in range(-3, 4):
-                    gx = pcx + dc
-                    gy = pcy + dr
-                    nx = gx * unit
-                    ny = gy * unit
-                    if nx < 0 or nx + unit > WIDTH: continue
-                    if ny < 0 or ny + unit > (PLAY_ROWS - 2) * GRID_SIZE: continue
-                    if (gx, gy) in occupied: continue
-                    candidates.append((gx, gy, nx, ny))
+                    nx = cx + dc * GRID_SIZE - half
+                    ny = cy + dr * GRID_SIZE - half
+                    # 화면 안에 들어오는지 확인
+                    if nx < 0 or nx + half > WIDTH: continue
+                    if ny < 0 or ny + half > (PLAY_ROWS - 2) * GRID_SIZE: continue
+                    if (nx, ny) in occupied: continue
+                    candidates.append((nx, ny))
 
             random.shuffle(candidates)
             placed = 0
-            for (gx, gy, nx, ny) in candidates:
+            for (nx, ny) in candidates:
                 if placed >= 4: break
-                if (gx, gy) in occupied: continue
+                # 이미 선택한 위치와 겹치지 않는지 재확인
+                overlap = False
+                for (ox, oy) in occupied:
+                    if abs(ox - nx) < half and abs(oy - ny) < half:
+                        overlap = True; break
+                if overlap: continue
                 nb = SplitBlock(nx, ny, 2, self._drop_timer)
                 self.blocks.append(nb)
-                occupied.add((gx, gy))
+                occupied.add((nx, ny))
                 placed += 1
 
         elif parent.size == 2:
-            # size2 → size1 × 4개  (블럭 크기 = 1×GRID_SIZE)
-            unit = GRID_SIZE
+            # size2 → size1 × 4개
+            ps = parent.px_size  # = 2 * GRID_SIZE
+            gs = GRID_SIZE
 
-            # 이미 점유된 격자 좌표 집합 (GRID_SIZE 단위)
-            occupied = set()
-            for b in self.blocks:
-                if b.alive or b.invincible_timer > 0:
-                    gx = round(b.px / unit)
-                    gy = round(b._base_py / unit)
-                    for di in range(b.size):
-                        for dj in range(b.size):
-                            occupied.add((gx + dj, gy + di))
+            # 부모 중심
+            cx = int(parent.px) + ps // 2
+            cy = int(parent._base_py) + ps // 2
 
-            # 부모 중심을 GRID_SIZE 격자 좌표로
-            pcx = round(parent.px / unit)
-            pcy = round(parent._base_py / unit)
-
-            # 후보: 부모 주변 ±4 칸 범위
             candidates = []
             for dr in range(-4, 5):
                 for dc in range(-4, 5):
-                    gx = pcx + dc
-                    gy = pcy + dr
-                    nx = gx * unit
-                    ny = gy * unit
-                    if nx < 0 or nx + unit > WIDTH: continue
-                    if ny < 0 or ny + unit > (PLAY_ROWS - 1) * GRID_SIZE: continue
-                    if (gx, gy) in occupied: continue
-                    candidates.append((gx, gy, nx, ny))
+                    nx = cx + dc * gs - gs // 2
+                    ny = cy + dr * gs - gs // 2
+                    if nx < 0 or nx + gs > WIDTH: continue
+                    if ny < 0 or ny + gs > (PLAY_ROWS - 1) * GRID_SIZE: continue
+                    if (nx, ny) in occupied: continue
+                    candidates.append((nx, ny))
 
             random.shuffle(candidates)
             placed = 0
-            for (gx, gy, nx, ny) in candidates:
+            for (nx, ny) in candidates:
                 if placed >= 4: break
-                if (gx, gy) in occupied: continue
+                overlap = False
+                for (ox, oy) in occupied:
+                    if abs(ox - nx) < gs and abs(oy - ny) < gs:
+                        overlap = True; break
+                if overlap: continue
                 nb = SplitBlock(nx, ny, 1, self._drop_timer)
                 self.blocks.append(nb)
-                occupied.add((gx, gy))
+                occupied.add((nx, ny))
                 placed += 1
 
     def take_hit(self, block): block.take_hit()
@@ -1513,11 +1433,11 @@ class GameManager:
         elif chapter == 2:
             # 10초 후 첫 발동, 5초 지속, 10초 쿨다운
             return DebuffManager(chapter, mode="interval",
-                                 interval_params=(600, 240, 600))
+                                 interval_params=(600, 300, 600))
         elif chapter == 3:
             # 5초 후 첫 발동, 5초 지속, 5초 쿨다운
             return DebuffManager(chapter, mode="interval",
-                                 interval_params=(300, 240, 300))
+                                 interval_params=(300, 300, 300))
         return DebuffManager(chapter, mode="none")
 
     def update(self):
