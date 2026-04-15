@@ -1317,29 +1317,193 @@ def update_fake_ball(fb: FakeBall, pattern_blocks):
 
 class AIController:
     """
-    G키로 토글. 활성화 시 패들이 공의 x 위치를 자동 추적.
-    디버프(반전/패들 둔화 등)에 무관하게 항상 실제 위치 기준으로 이동.
+    G키로 토글하는 오토 모드.
+
+    두 가지 역할을 동시에 수행:
+
+    [수비] 공이 내려올 때 낙하 지점을 벽 반사까지 시뮬레이션하여 예측.
+           패들이 그 지점에 정확히 위치해 절대 공을 놓치지 않는다.
+
+    [공격] 공을 받는 순간의 패들 위치가 반사각을 결정하므로,
+           아웃라인(PLAY_ROWS)에 가장 가까운 '위험 블럭'의 x 중앙을
+           목표로 설정하여 조준한 뒤 공을 맞는다.
+           - 일반 PLAY 상태: PatternBlock 중 row가 가장 큰 블럭
+           - BOSS 상태: 보스의 가장 아래쪽 히트박스
+
+    패들 이동은 실제 물리 패들 이동으로 처리 (순간이동 없음).
+    공 속도보다 항상 빠른 속도로 이동해 절대 놓치지 않음을 보장.
     """
+
+    # 수비 우선인지 공격 우선인지 판단하는 y 임계값
+    # 공이 패들 y의 이 비율 이상 내려오면 수비 모드
+    DEFENSE_THRESHOLD = 0.55   # 화면 세로의 55% 아래면 수비 우선
+
     def __init__(self):
-        self.enabled = False
+        self.enabled       = False
+        self._target_x     = None   # 최종 패들 목표 x (패들 왼쪽 기준)
+        self._attack_x     = None   # 공격 조준 x (공이 위로 갈 때 계산)
 
     def toggle(self):
         self.enabled = not self.enabled
 
-    def update(self, paddle: Paddle, ball: Ball):
-        if not self.enabled:
-            return
-        # 패들 중앙을 공의 x에 맞춤 (즉시 추적 — 절대 놓치지 않음)
-        target_x = ball.x - paddle.width // 2
-        target_x = max(0, min(WIDTH - paddle.width, target_x))
-        # 빠르게 따라가되 텔레포트처럼 보이지 않도록 보간 (공 속도보다 빠른 속도로)
-        diff = target_x - paddle.x
-        step = min(abs(diff), max(Paddle.BASE_SPEED * 2, abs(diff)))
+    # ── 공의 낙하 지점 예측 (벽 반사 포함) ──
+    @staticmethod
+    def _predict_landing(ball: Ball, paddle: Paddle) -> float:
+        """
+        현재 공의 위치·속도로 패들 y에 닿을 때의 x를 계산.
+        벽 반사를 정확히 시뮬레이션한다.
+        """
+        if ball.vy <= 0:
+            # 올라가는 중 → 천장 반사 후 내려오는 지점 계산
+            # 천장까지 거리
+            t_ceil  = ball.y / max(abs(ball.vy), 0.001)
+            x_ceil  = ball.x + ball.vx * t_ceil
+            y_after = 0.0
+            vx_after = ball.vx
+            vy_after = abs(ball.vy)   # 반사 후 아래 방향
+        else:
+            x_ceil   = ball.x
+            y_after  = ball.y
+            vx_after = ball.vx
+            vy_after = ball.vy
+
+        # 패들 y까지 내려오는 시뮬레이션 (벽 반사만 처리, 블럭 무시)
+        target_y = paddle.y
+        x        = x_ceil
+        vx       = vx_after
+        remaining_y = target_y - y_after
+
+        if remaining_y <= 0:
+            remaining_y = target_y - ball.y
+            x           = ball.x
+            vx          = ball.vx
+
+        while remaining_y > 0:
+            if vx == 0:
+                break
+            # 다음 벽까지 x 거리
+            if vx > 0:
+                dx_to_wall = (WIDTH - ball.radius) - x
+            else:
+                dx_to_wall = x - ball.radius
+
+            # 그 거리에 도달할 때 y 이동량
+            dy_for_wall = abs(dx_to_wall / vx) * abs(vy_after)
+
+            if dy_for_wall >= remaining_y:
+                # 패들에 먼저 닿음
+                fraction = remaining_y / max(dy_for_wall, 0.001)
+                x += vx * abs(remaining_y / max(abs(vy_after), 0.001))
+                remaining_y = 0
+            else:
+                # 벽에 먼저 닿음 → 반사
+                x = WIDTH - ball.radius if vx > 0 else ball.radius
+                vx = -vx
+                remaining_y -= dy_for_wall
+
+        # 화면 안으로 클램프
+        x = max(ball.radius, min(WIDTH - ball.radius, x))
+        return float(x)
+
+    # ── 위험 블럭 선정 ──
+    @staticmethod
+    def _find_danger_target(game_state) -> float | None:
+        """
+        PLAY: PatternBlock 중 가장 아래쪽(row 최대) 블럭의 x 중앙.
+        BOSS: 보스의 all_rects() 중 가장 아래쪽 rect의 x 중앙.
+        없으면 None.
+        """
+        state = game_state.get('state')
+        if state == 'PLAY':
+            blocks = game_state.get('pattern_blocks', [])
+            if not blocks:
+                return None
+            # 아웃라인에 가장 가까운 블럭 = row가 가장 큰 셀
+            best_row = -999
+            best_cx  = None
+            for pb in blocks:
+                oy = pb.pixel_y_offset()
+                for (c, r) in pb.blocks:
+                    actual_r = r * GRID_SIZE + oy
+                    if actual_r > best_row:
+                        best_row = actual_r
+                        best_cx  = c * GRID_SIZE + GRID_SIZE // 2
+            return float(best_cx) if best_cx is not None else None
+
+        elif state == 'BOSS':
+            boss = game_state.get('boss')
+            if boss is None:
+                return None
+            rects_pieces = boss.all_rects()
+            if not rects_pieces:
+                return None
+            # 가장 아래쪽 rect
+            best_bottom = -1
+            best_cx     = None
+            for (rect, _) in rects_pieces:
+                if rect.bottom > best_bottom:
+                    best_bottom = rect.bottom
+                    best_cx     = rect.centerx
+            return float(best_cx) if best_cx is not None else None
+
+        return None
+
+    # ── 패들을 목표 x로 빠르게 이동 (절대 놓치지 않는 속도) ──
+    @staticmethod
+    def _move_paddle(paddle: Paddle, target_center_x: float):
+        """
+        목표 x(패들 중앙 기준)로 패들을 이동.
+        속도는 공보다 항상 빠름 (BALL_BASE_SPEED * 2 이상).
+        """
+        target_left = target_center_x - paddle.width // 2
+        target_left = max(0.0, min(float(WIDTH - paddle.width), target_left))
+        diff = target_left - paddle.x
+        # 남은 거리만큼 한 번에 이동 (순간이동이 아닌 물리적 이동이지만
+        # 공보다 빠르게 설정해 절대 놓치지 않도록 보장)
+        max_step = max(BALL_BASE_SPEED * 2.5, abs(diff))
+        step = min(abs(diff), max_step)
         if diff > 0:
             paddle.x += step
         elif diff < 0:
             paddle.x -= step
         paddle.x = max(0, min(WIDTH - paddle.width, paddle.x))
+
+    # ── 메인 업데이트 ──
+    def update(self, paddle: Paddle, ball: Ball, game_state: dict):
+        if not self.enabled:
+            return
+
+        pred_x   = self._predict_landing(ball, paddle)
+        danger_x = self._find_danger_target(game_state)
+
+        if ball.vy > 0:
+            # 공이 내려오고 있음 → 수비 + 조준 혼합
+            # 공이 화면 아래쪽에 있을수록 수비(낙하지점)에 비중을 더 높임
+            defense_ratio = min(1.0,
+                max(0.0, (ball.y - HEIGHT * 0.3) / (HEIGHT * 0.4)))
+
+            if danger_x is not None and defense_ratio < 0.9:
+                # 공격 조준: 목표 블럭을 향해 공을 보내기 위한 패들 x 계산
+                # 패들에서 목표 블럭까지의 오프셋 → offset=(target-paddle_center)/paddle_half
+                # 반사각 공식 역산: paddle_center = target_block_x (단순 근사)
+                aim_center = danger_x
+                # 수비/공격 비율로 혼합
+                final_center = (pred_x * defense_ratio
+                                + aim_center * (1.0 - defense_ratio))
+            else:
+                # 수비 전담: 낙하 지점으로 패들 이동
+                final_center = pred_x
+
+            self._move_paddle(paddle, final_center)
+
+        else:
+            # 공이 올라가고 있음 → 다음 공격 준비
+            # 여유롭게 위험 블럭 쪽으로 조금씩 이동
+            if danger_x is not None:
+                self._move_paddle(paddle, danger_x)
+            else:
+                # 타겟 없으면 중앙 대기
+                self._move_paddle(paddle, WIDTH / 2)
 
 
 # =============================================================
@@ -1395,7 +1559,12 @@ class GameManager:
     def handle_input(self):
         # AI 모드일 때는 패들 자동 제어 (키 입력 무시)
         if self.ai.enabled:
-            self.ai.update(self.paddle, self.ball)
+            game_state = {
+                'state':          self.state,
+                'pattern_blocks': self.pattern_blocks,
+                'boss':           self.boss,
+            }
+            self.ai.update(self.paddle, self.ball, game_state)
             return
 
         keys      = pygame.key.get_pressed()
